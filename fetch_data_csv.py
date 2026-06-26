@@ -78,7 +78,7 @@ def main():
     print(f"{len(df)} linhas x {len(df.columns)} colunas")
 
     os.makedirs("docs", exist_ok=True)
-    caminho_csv = "docs/BASE NFS ENTRADA.csv"
+    caminho_csv = "docs/BASE_NFS_ENTRADA.csv"
     df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
 
     print(f"Concluido: '{caminho_csv}' gerado com {len(df)} registros.")
