@@ -19,16 +19,23 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install msal requests pandas openpyxl
+        run: pip install msal requests pandas openpyxl PyNaCl
 
       - name: Rodar script
+        id: fetch
         env:
-          AZURE_CLIENT_ID:      ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID:      ${{ secrets.AZURE_TENANT_ID }}
-          MSAL_TOKEN_CACHE:     ${{ secrets.MSAL_TOKEN_CACHE }}
+          AZURE_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+          MSAL_TOKEN_CACHE:      ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK: ${{ secrets.SHAREPOINT_SHARE_LINK }}
-          SHEET_NAME:           BASE SISTEMA
+          SHEET_NAME:            BASE SISTEMA
         run: python fetch_data.py
+
+      - name: Atualizar cache do token no GitHub Secrets
+        env:
+          GH_PAT:     ${{ secrets.GH_PAT }}
+          REPO:       ${{ github.repository }}
+        run: python update_secret.py
 
       - name: Publicar JSON no GitHub Pages
         run: |
