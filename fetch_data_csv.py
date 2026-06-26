@@ -19,6 +19,8 @@ TENANT_ID   = os.environ["AZURE_TENANT_ID"]
 SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK"]
 CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
 ABA         = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA")
+SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
+               "https://graph.microsoft.com/Sites.Read.All"]
 # ──────────────────────────────────────────────────────────
 
 def get_token() -> str:
