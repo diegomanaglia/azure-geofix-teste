@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore", message="Print area cannot be set")
 # ── Credenciais via secrets do GitHub ─────────────────────
 CLIENT_ID   = os.environ["AZURE_CLIENT_ID"]
 TENANT_ID   = os.environ["AZURE_TENANT_ID"]
-SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK_2"]
+SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK"]
 CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
 ABA         = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA")
 SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
