@@ -1,9 +1,9 @@
-name: Atualizar CSV do SharePoint
+name: Atualizar CSVs do SharePoint
 
 on:
   schedule:
-    - cron: '0 * * * *'  # toda hora
-  workflow_dispatch:       # permite rodar manualmente
+    - cron: '0 */2 * * *'  # a cada 2 horas
+  workflow_dispatch:        # permite rodar manualmente
 
 jobs:
   exportar:
@@ -21,7 +21,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install msal requests pandas openpyxl PyNaCl
 
-      - name: Rodar script
+      - name: Gerar dados_base.csv
         env:
           AZURE_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
@@ -30,16 +30,27 @@ jobs:
           SHEET_NAME:            BASE NFS DE ENTRADA
         run: python fetch_data_csv.py
 
+      - name: Gerar dados_complemento.csv
+        env:
+          AZURE_CLIENT_ID:                  ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}
+          MSAL_TOKEN_CACHE:                 ${{ secrets.MSAL_TOKEN_CACHE }}
+          SHAREPOINT_SHARE_LINK:            ${{ secrets.SHAREPOINT_SHARE_LINK }}
+          SHAREPOINT_SHARE_LINK_COMPLEMENTO: ${{ secrets.SHAREPOINT_SHARE_LINK_COMPLEMENTO }}
+          SHEET_NAME:                       BASE NFS DE ENTRADA
+          SHEET_NAME_COMPLEMENTO:           ${{ vars.SHEET_NAME_COMPLEMENTO }}
+        run: python fetch_data_complemento_csv.py
+
       - name: Atualizar cache do token no GitHub Secrets
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           REPO:   ${{ github.repository }}
         run: python update_secret.py
 
-      - name: Publicar CSV no GitHub Pages
+      - name: Publicar CSVs no GitHub Pages
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/
-          git diff --staged --quiet || git commit -m "Atualiza CSV $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git diff --staged --quiet || git commit -m "Atualiza CSVs $(date -u '+%Y-%m-%d %H:%M') UTC"
           git push

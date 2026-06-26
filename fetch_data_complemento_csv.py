@@ -1,10 +1,8 @@
 import base64
 import io
-import json
 import os
 import sys
 import warnings
-from datetime import datetime, timezone, timedelta
 
 import msal
 import requests
@@ -14,12 +12,22 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 warnings.filterwarnings("ignore", message="Print area cannot be set")
 
+# Carrega variaveis do .env em execucoes locais (ignorado se nao instalado)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ── Credenciais via secrets do GitHub ─────────────────────
 CLIENT_ID   = os.environ["AZURE_CLIENT_ID"]
 TENANT_ID   = os.environ["AZURE_TENANT_ID"]
-SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK"]
 CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
-ABA         = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA")
+# Planilha de complemento (cai para a base caso a especifica nao exista)
+SHARE_LINK  = os.environ.get("SHAREPOINT_SHARE_LINK_COMPLEMENTO",
+                             os.environ["SHAREPOINT_SHARE_LINK"])
+ABA         = os.environ.get("SHEET_NAME_COMPLEMENTO",
+                             os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA"))
 SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
                "https://graph.microsoft.com/Sites.Read.All"]
 # ──────────────────────────────────────────────────────────
@@ -45,7 +53,6 @@ def get_token() -> str:
     if "access_token" not in result:
         raise Exception(f"Erro ao obter token: {result.get('error_description')}")
 
-    # Salva o cache atualizado em disco para o update_secret.py ler
     if cache.has_state_changed:
         with open("token_cache.json", "w", encoding="utf-8") as f:
             f.write(cache.serialize())
@@ -57,24 +64,6 @@ def get_token() -> str:
 def encode_share_url(url: str) -> str:
     b64 = base64.b64encode(url.encode("utf-8")).decode("utf-8")
     return "u!" + b64.rstrip("=").replace("/", "_").replace("+", "-")
-
-
-def df_para_json(df: pd.DataFrame) -> list:
-    registros = []
-    for _, row in df.iterrows():
-        registro = {}
-        for col in df.columns:
-            val = row[col]
-            if pd.isna(val):
-                registro[str(col)] = None
-            elif isinstance(val, pd.Timestamp):
-                registro[str(col)] = val.isoformat()
-            elif hasattr(val, "item"):
-                registro[str(col)] = val.item()
-            else:
-                registro[str(col)] = val
-        registros.append(registro)
-    return registros
 
 
 def main():
@@ -99,21 +88,11 @@ def main():
     df = pd.read_excel(io.BytesIO(conteudo), sheet_name=ABA)
     print(f"{len(df)} linhas x {len(df.columns)} colunas")
 
-    fuso_brasilia = timezone(timedelta(hours=-3))
-    agora = datetime.now(fuso_brasilia).strftime("%Y-%m-%dT%H:%M:%S-03:00")
-
-    output = {
-        "ultima_atualizacao": agora,
-        "aba": ABA,
-        "total": len(df),
-        "dados": df_para_json(df)
-    }
-
     os.makedirs("docs", exist_ok=True)
-    with open("docs/dados2.json", "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+    caminho_csv = "docs/dados_complemento.csv"
+    df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
 
-    print(f"Concluido: docs/dados.json gerado com {len(df)} registros.")
+    print(f"Concluido: '{caminho_csv}' gerado com {len(df)} registros.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+# Variaveis de ambiente e segredos
+.env
+token_cache.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

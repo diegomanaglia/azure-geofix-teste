@@ -13,6 +13,13 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 warnings.filterwarnings("ignore", message="Print area cannot be set")
 
+# Carrega variaveis do .env em execucoes locais (ignorado se nao instalado)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ── Credenciais via secrets do GitHub ─────────────────────
 CLIENT_ID   = os.environ["AZURE_CLIENT_ID"]
 TENANT_ID   = os.environ["AZURE_TENANT_ID"]
@@ -80,7 +87,7 @@ def main():
     print(f"{len(df)} linhas x {len(df.columns)} colunas")
 
     os.makedirs("docs", exist_ok=True)
-    caminho_csv = "docs/BASE_NFS_ENTRADA.csv"
+    caminho_csv = "docs/dados_base.csv"
     df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
 
     print(f"Concluido: '{caminho_csv}' gerado com {len(df)} registros.")
