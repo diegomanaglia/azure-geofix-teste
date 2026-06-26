@@ -45,6 +45,12 @@ def get_token() -> str:
     if "access_token" not in result:
         raise Exception(f"Erro ao obter token: {result.get('error_description')}")
 
+    # Salva o cache atualizado em disco para o update_secret.py ler
+    if cache.has_state_changed:
+        with open("token_cache.json", "w", encoding="utf-8") as f:
+            f.write(cache.serialize())
+        print("Cache do token atualizado em disco.")
+
     return result["access_token"]
 
 
