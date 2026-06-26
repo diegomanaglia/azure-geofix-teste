@@ -32,13 +32,11 @@ jobs:
 
       - name: Gerar dados_complemento.csv
         env:
-          AZURE_CLIENT_ID:                  ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}
-          MSAL_TOKEN_CACHE:                 ${{ secrets.MSAL_TOKEN_CACHE }}
-          SHAREPOINT_SHARE_LINK:            ${{ secrets.SHAREPOINT_SHARE_LINK }}
+          AZURE_CLIENT_ID:                   ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:                   ${{ secrets.AZURE_TENANT_ID }}
+          MSAL_TOKEN_CACHE:                  ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK_COMPLEMENTO: ${{ secrets.SHAREPOINT_SHARE_LINK_COMPLEMENTO }}
-          SHEET_NAME:                       BASE NFS DE ENTRADA
-          SHEET_NAME_COMPLEMENTO:           ${{ vars.SHEET_NAME_COMPLEMENTO }}
+          SHEET_NAME_COMPLEMENTO:            BASE SISTEMA
         run: python fetch_data_complemento_csv.py
 
       - name: Atualizar cache do token no GitHub Secrets

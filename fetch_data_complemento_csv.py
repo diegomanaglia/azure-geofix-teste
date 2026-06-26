@@ -19,25 +19,13 @@ try:
 except ImportError:
     pass
 
-def env(nome: str, *padroes: str) -> str:
-    """Retorna a 1a variavel/padrao com valor nao vazio (ignora strings em branco)."""
-    valor = os.environ.get(nome, "").strip()
-    if valor:
-        return valor
-    for p in padroes:
-        v = os.environ.get(p, "").strip() if p in os.environ else (p or "").strip()
-        if v:
-            return v
-    return ""
-
-
 # ── Credenciais via secrets do GitHub ─────────────────────
 CLIENT_ID   = os.environ["AZURE_CLIENT_ID"]
 TENANT_ID   = os.environ["AZURE_TENANT_ID"]
 CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
-# Planilha de complemento (cai para a base caso a especifica esteja vazia)
-SHARE_LINK  = env("SHAREPOINT_SHARE_LINK_COMPLEMENTO", "SHAREPOINT_SHARE_LINK")
-ABA         = env("SHEET_NAME_COMPLEMENTO", "SHEET_NAME", "BASE NFS DE ENTRADA")
+# Planilha de complemento (link e aba proprios; sem fallback para outra aba)
+SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK_COMPLEMENTO"]
+ABA         = os.environ.get("SHEET_NAME_COMPLEMENTO", "BASE SISTEMA").strip() or "BASE SISTEMA"
 SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
                "https://graph.microsoft.com/Sites.Read.All"]
 # ──────────────────────────────────────────────────────────
