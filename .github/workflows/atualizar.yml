@@ -41,6 +41,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/dados.json
+          git add docs/
           git diff --staged --quiet || git commit -m "Atualiza dados $(date -u '+%Y-%m-%d %H:%M') UTC"
           git push
