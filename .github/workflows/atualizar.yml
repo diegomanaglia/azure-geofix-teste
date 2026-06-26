@@ -28,7 +28,7 @@ jobs:
           AZURE_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
           MSAL_TOKEN_CACHE:      ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK: ${{ secrets.SHAREPOINT_SHARE_LINK }}
-          SHEET_NAME:            BASE SISTEMA
+          SHEET_NAME:            BASE NFS DE ENTRADA
         run: python fetch_data.py
 
       - name: Atualizar cache do token no GitHub Secrets
