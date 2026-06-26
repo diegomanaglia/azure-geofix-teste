@@ -17,9 +17,9 @@ warnings.filterwarnings("ignore", message="Print area cannot be set")
 # ── Credenciais via secrets do GitHub ─────────────────────
 CLIENT_ID   = os.environ["AZURE_CLIENT_ID"]
 TENANT_ID   = os.environ["AZURE_TENANT_ID"]
-SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK"]
+SHARE_LINK  = os.environ["SHAREPOINT_SHARE_LINK_2"]
 CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
-ABA         = os.environ.get("SHEET_NAME", "BASE SISTEMA")
+ABA         = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA")
 SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
                "https://graph.microsoft.com/Sites.Read.All"]
 # ──────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ def main():
     }
 
     os.makedirs("docs", exist_ok=True)
-    with open("docs/dados.json", "w", encoding="utf-8") as f:
+    with open("docs/dados2.json", "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
     print(f"Concluido: docs/dados.json gerado com {len(df)} registros.")
