@@ -27,6 +27,7 @@ jobs:
           AZURE_TENANT_ID:                   ${{ secrets.AZURE_TENANT_ID }}
           MSAL_TOKEN_CACHE:                  ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK:             ${{ secrets.SHAREPOINT_SHARE_LINK }}
+          SHAREPOINT_SHARE_LINK_BASE_2025:   ${{ secrets.SHAREPOINT_SHARE_LINK_BASE_2025 }}
           SHAREPOINT_SHARE_LINK_COMPLEMENTO: ${{ secrets.SHAREPOINT_SHARE_LINK_COMPLEMENTO }}
           SHEET_NAME:                        BASE NFS DE ENTRADA
           SHEET_NAME_COMPLEMENTO:            BASE SISTEMA

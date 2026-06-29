@@ -27,9 +27,12 @@ CACHE_JSON  = os.environ["MSAL_TOKEN_CACHE"]
 SCOPES      = ["https://graph.microsoft.com/Files.Read.All",
                "https://graph.microsoft.com/Sites.Read.All"]
 
-# Planilha BASE (NFs de entrada)
-SHARE_LINK_BASE = os.environ["SHAREPOINT_SHARE_LINK"]
-ABA_BASE        = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA").strip() or "BASE NFS DE ENTRADA"
+# Planilhas BASE (NFs de entrada) — 2026 e 2025, mesma aba e mesmo layout
+SHARE_LINK_BASE      = os.environ["SHAREPOINT_SHARE_LINK"]
+SHARE_LINK_BASE_2025 = os.environ["SHAREPOINT_SHARE_LINK_BASE_2025"]
+ABA_BASE             = os.environ.get("SHEET_NAME", "BASE NFS DE ENTRADA").strip() or "BASE NFS DE ENTRADA"
+# Nas duas bases consideramos apenas as colunas A ate AH (1 a 34)
+COLS_BASE            = "A:AH"
 
 # Planilha COMPLEMENTO (itens do pedido / sistema)
 SHARE_LINK_COMP = os.environ["SHAREPOINT_SHARE_LINK_COMPLEMENTO"]
@@ -75,9 +78,10 @@ def encode_share_url(url: str) -> str:
     return "u!" + b64.rstrip("=").replace("/", "_").replace("+", "-")
 
 
-def baixar_planilha(token: str, share_link: str, aba: str) -> pd.DataFrame:
+def baixar_planilha(token: str, share_link: str, aba: str, usecols=None) -> pd.DataFrame:
     """Resolve o link de compartilhamento, baixa o arquivo e le a aba indicada.
-    Le tudo como texto (dtype=str) para preservar o tratamento de codigos."""
+    Le tudo como texto (dtype=str) para preservar o tratamento de codigos.
+    usecols: intervalo de colunas no estilo Excel (ex.: 'A:AH') ou None para todas."""
     headers   = {"Authorization": f"Bearer {token}"}
     share_id  = encode_share_url(share_link)
     item_resp = requests.get(
@@ -89,7 +93,7 @@ def baixar_planilha(token: str, share_link: str, aba: str) -> pd.DataFrame:
     print(f"  Arquivo: {item['name']}")
 
     conteudo = requests.get(item["@microsoft.graph.downloadUrl"]).content
-    df = pd.read_excel(io.BytesIO(conteudo), sheet_name=aba, dtype=str)
+    df = pd.read_excel(io.BytesIO(conteudo), sheet_name=aba, dtype=str, usecols=usecols)
     print(f"  Aba '{aba}': {len(df)} linhas x {len(df.columns)} colunas")
     return df
 
@@ -191,8 +195,16 @@ def main():
     print("Obtendo token...")
     token = get_token()
 
-    print("\nBaixando planilha BASE (NFs de entrada)...")
-    base = baixar_planilha(token, SHARE_LINK_BASE, ABA_BASE)
+    print("\nBaixando planilha BASE 2026 (NFs de entrada)...")
+    base_2026 = baixar_planilha(token, SHARE_LINK_BASE, ABA_BASE, usecols=COLS_BASE)
+
+    print("\nBaixando planilha BASE 2025 (NFs de entrada)...")
+    base_2025 = baixar_planilha(token, SHARE_LINK_BASE_2025, ABA_BASE, usecols=COLS_BASE)
+
+    # As duas bases tem layout identico (colunas A:AH) -> empilha em uma so
+    base = pd.concat([base_2026, base_2025], ignore_index=True)
+    print(f"\nBase consolidada (2026 + 2025): {len(base)} linhas "
+          f"({len(base_2026)} + {len(base_2025)}) x {len(base.columns)} colunas")
 
     print("\nBaixando planilha COMPLEMENTO (itens do pedido)...")
     comp = baixar_planilha(token, SHARE_LINK_COMP, ABA_COMP)
