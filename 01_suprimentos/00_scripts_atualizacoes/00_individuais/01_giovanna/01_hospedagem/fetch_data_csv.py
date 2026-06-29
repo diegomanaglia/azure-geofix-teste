@@ -86,8 +86,8 @@ def main():
     df = pd.read_excel(io.BytesIO(conteudo), sheet_name=ABA)
     print(f"{len(df)} linhas x {len(df.columns)} colunas")
 
-    os.makedirs("docs", exist_ok=True)
-    caminho_csv = "docs/dados_base.csv"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    caminho_csv = os.path.join(base_dir, "dados_base.csv")
     df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
 
     print(f"Concluido: '{caminho_csv}' gerado com {len(df)} registros.")

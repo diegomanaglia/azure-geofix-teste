@@ -28,7 +28,7 @@ jobs:
           MSAL_TOKEN_CACHE:      ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK: ${{ secrets.SHAREPOINT_SHARE_LINK }}
           SHEET_NAME:            BASE NFS DE ENTRADA
-        run: python fetch_data_csv.py
+        run: python "01_suprimentos/00_scripts_atualizacoes/00_individuais/01_giovanna/01_hospedagem/fetch_data_csv.py"
 
       - name: Gerar dados_complemento.csv
         env:
@@ -37,18 +37,18 @@ jobs:
           MSAL_TOKEN_CACHE:                  ${{ secrets.MSAL_TOKEN_CACHE }}
           SHAREPOINT_SHARE_LINK_COMPLEMENTO: ${{ secrets.SHAREPOINT_SHARE_LINK_COMPLEMENTO }}
           SHEET_NAME_COMPLEMENTO:            BASE SISTEMA
-        run: python fetch_data_complemento_csv.py
+        run: python "01_suprimentos/00_scripts_atualizacoes/00_individuais/01_giovanna/01_hospedagem/fetch_data_complemento_csv.py"
 
       - name: Atualizar cache do token no GitHub Secrets
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           REPO:   ${{ github.repository }}
-        run: python update_secret.py
+        run: python auth/update_secret.py
 
-      - name: Publicar CSVs no GitHub Pages
+      - name: Publicar CSVs no repositorio
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/
+          git add "01_suprimentos/00_scripts_atualizacoes/00_individuais/01_giovanna/01_hospedagem/dados_base.csv" "01_suprimentos/00_scripts_atualizacoes/00_individuais/01_giovanna/01_hospedagem/dados_complemento.csv"
           git diff --staged --quiet || git commit -m "Atualiza CSVs $(date -u '+%Y-%m-%d %H:%M') UTC"
           git push
