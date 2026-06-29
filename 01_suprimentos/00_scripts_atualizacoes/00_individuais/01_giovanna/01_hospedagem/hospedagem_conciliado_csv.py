@@ -200,7 +200,10 @@ def main():
     print("\nConciliando...")
     sai = conciliar(base, comp)
 
-    sai.to_csv(SAIDA_CSV, index=False, encoding="utf-8-sig")
+    # Padrao brasileiro para abrir corretamente no Excel pt-BR:
+    # separador de colunas ';' e separador decimal ',' (evita que 1739.4997
+    # seja lido como 17394997 quando o ponto e' tratado como separador de milhar).
+    sai.to_csv(SAIDA_CSV, index=False, encoding="utf-8-sig", sep=";", decimal=",")
     print(f"\nConcluido: '{SAIDA_CSV}' gerado com {len(sai)} linhas "
           f"x {len(sai.columns)} colunas.")
 
