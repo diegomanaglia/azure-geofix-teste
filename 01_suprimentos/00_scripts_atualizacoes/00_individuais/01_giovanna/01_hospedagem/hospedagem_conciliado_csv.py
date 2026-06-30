@@ -133,28 +133,50 @@ def limpa_artefato_float(valor):
     return texto
 
 
-def _descricao_repr(serie):
-    """Descricao representativa de um grupo: a mais frequente (mode)."""
-    s = serie.dropna()
-    if s.empty:
-        return ""
-    m = s.mode()
-    return m.iloc[0] if not m.empty else s.iloc[0]
+def _agrega_complementos(serie):
+    """Concatena os complementos distintos de um mesmo OC+item, preservando a
+    ordem de aparicao e sem repetir textos iguais."""
+    vistos = []
+    for valor in serie:
+        if pd.isna(valor):
+            continue
+        texto = str(valor).strip()
+        if texto and texto not in vistos:
+            vistos.append(texto)
+    return " | ".join(vistos)
 
 
-# Colunas numericas da saida (mantidas como numero p/ exportar com decimal ',')
-COLS_NUMERICAS = [
-    "Quantidade Pedida", "Valor do Rateio", "Lançamentos NF na base (OC+item)",
-    "Valor Rateio total (OC+item)", "Valor NF na base (OC+item)",
+_RE_NUM = r"^-?\d+(\.\d+)?$"        # numero inteiro ou decimal (ponto)
+_RE_DECIMAL = r"\.\d*[1-9]"          # tem parte decimal diferente de zero
+
+
+def coluna_numerica(serie: pd.Series) -> pd.Series:
+    """Converte a coluna para numero (float) somente se ela contiver valores
+    decimais reais (ex.: '1739.4997'); assim o CSV sai com decimal ',' e o Excel
+    pt-BR le certo. Caso contrario mantem como TEXTO (limpando o artefato '.0'),
+    preservando codigos com zeros a esquerda, OCs e datas."""
+    s = serie.astype("string").str.strip()
+    nao_vazio = s[s.notna() & (s != "")]
+    if len(nao_vazio) == 0:
+        return serie.map(limpa_artefato_float)
+    todos_num   = bool(nao_vazio.str.match(_RE_NUM).all())
+    tem_decimal = bool(nao_vazio.str.contains(_RE_DECIMAL).any())
+    if todos_num and tem_decimal:
+        return pd.to_numeric(serie, errors="coerce")
+    return serie.map(limpa_artefato_float)
+
+
+# Colunas numericas de enriquecimento (forcadas a numero p/ decimal ',')
+COLS_NUM_ENRIQUECIMENTO = [
+    "Valor Rateio total (OC+item)", "Valor NF total (OC+item)",
     "Diferença NF - Rateio (OC+item)",
 ]
 
 
 def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
-    """Full outer entre itens do pedido (complemento) e NFs da base (nivel OC+item).
-    Mantem TODOS os itens de pedido e TODAS as NFs da base; o que nao cruza fica em branco.
-    - Parte 1: itens do pedido (com agregados da NF quando houver match).
-    - Parte 2: NFs da base sem item de pedido (agregadas por OC+item)."""
+    """Mantem a base de NFs (2025+2026) COMPLETA como espinha (uma linha por NF,
+    todas as colunas A:AH) e ENRIQUECE com dados do complemento por OC+item.
+    O que nao casar no complemento fica em branco."""
     base = base.copy()
     comp = comp.copy()
     # Chaves: OC normalizada numericamente; CODIGO comparado como texto (preserva zeros)
@@ -163,109 +185,55 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     comp["_oc"]  = comp["Nº Ordem Compra"].map(normaliza_chave)
     comp["_cod"] = comp["Serviço"].map(normaliza_codigo)
 
-    # Categoria do servico = descricao mais frequente por CODIGO (na base)
-    mapa_categoria = (
-        base.dropna(subset=["DESCRIÇÃO PRODUTO OU SERVIÇO"])
-        .groupby("_cod")["DESCRIÇÃO PRODUTO OU SERVIÇO"]
-        .agg(_descricao_repr)
+    # ── Enriquecimento do complemento, agregado por (OC+item) ──
+    # Complemento da Descricao: concatena distintos preservando a ordem de Seq.
+    comp_ord = comp.copy()
+    comp_ord["_seq"] = pd.to_numeric(comp_ord["Seq."], errors="coerce")
+    comp_ord = comp_ord.sort_values(["_oc", "_cod", "_seq"], kind="stable")
+    compl_desc = (
+        comp_ord.groupby(["_oc", "_cod"])["Complemento da Descrição"]
+        .agg(_agrega_complementos)
         .to_dict()
     )
-
-    # Agregado da base por (OC+item): valor de NF, qtde de lancamentos e descricao
-    base["_valnf"] = pd.to_numeric(base["VALOR TOTAL"], errors="coerce")
-    sem_chave = base["_oc"].isna() | base["_cod"].isna()
-    n_sem_chave = int(sem_chave.sum())
-    agg = (
-        base[~sem_chave]
-        .groupby(["_oc", "_cod"])
-        .agg(oc_orig=("ORDEM DE COMPRA", "first"),
-             cod_orig=("CÓD PROD/SERV", "first"),
-             descricao=("DESCRIÇÃO PRODUTO OU SERVIÇO", _descricao_repr),
-             nf_valor=("_valnf", "sum"),
-             nf_qtde=("_valnf", "size"))
-        .reset_index()
-    )
-    agg["_key"] = list(zip(agg["_oc"], agg["_cod"]))
-    nf_valor = dict(zip(agg["_key"], agg["nf_valor"]))
-    nf_qtde  = dict(zip(agg["_key"], agg["nf_qtde"]))
-    desc_map = dict(zip(agg["_key"], agg["descricao"]))
-
     rat_val      = pd.to_numeric(comp["Valor do Rateio"], errors="coerce")
     rateio_total = rat_val.groupby([comp["_oc"], comp["_cod"]]).sum().to_dict()
+    pedido_qtde  = comp.groupby(["_oc", "_cod"]).size().to_dict()
 
-    # ── Parte 1: itens do pedido (espinha) ────────────────────
-    chaves = list(zip(comp["_oc"], comp["_cod"]))
+    # Valor total de NF por (OC+item) na propria base, para a diferenca
+    base_val = pd.to_numeric(base["VALOR TOTAL"], errors="coerce")
+    nf_total = base_val.groupby([base["_oc"], base["_cod"]]).sum().to_dict()
+
+    # ── Saida: base COMPLETA (todas as colunas A:AH), 1 linha por NF ──
     sai = pd.DataFrame()
-    sai["Nº Ordem Compra"]              = comp["Nº Ordem Compra"].map(limpa_artefato_float)
-    sai["Seq."]                         = comp["Seq."].map(limpa_artefato_float)
-    sai["Cód Serviço"]                  = comp["Serviço"].map(limpa_artefato_float)
-    sai["DESCRIÇÃO PRODUTO OU SERVIÇO"] = [desc_map.get(k, "") for k in chaves]
-    sai["Categoria do Serviço"]         = comp["_cod"].map(lambda c: mapa_categoria.get(c, ""))
-    sai["Complemento da Descrição"]     = comp["Complemento da Descrição"].fillna("")
-    sai["Quantidade Pedida"]            = pd.to_numeric(comp["Quantidade Pedida"], errors="coerce")
-    sai["U.M. O.C."]                    = comp["U.M. O.C."].map(limpa_artefato_float)
-    sai["Valor do Rateio"]              = rat_val.values
-    sai["Fornecedor"]                   = comp["Fornecedor"].map(limpa_artefato_float)
-    sai["Fantasia Fornecedor"]          = comp["Fantasia Fornecedor"].map(limpa_artefato_float)
-    sai["Projeto"]                      = comp["Projeto"].map(limpa_artefato_float)
-    sai["Descr. Projeto"]               = comp["Descr. Projeto"].map(limpa_artefato_float)
-    sai["Fase"]                         = comp["Fase"].map(limpa_artefato_float)
-    sai["Descr. Fase"]                  = comp["Descr. Fase"].map(limpa_artefato_float)
-    sai["Conta Financeira"]             = comp["Conta Financeira"].map(limpa_artefato_float)
-    sai["Conta Contábil"]               = comp["Conta Contábil"].map(limpa_artefato_float)
-    sai["Usuário Comprador"]            = comp["Usuário Comprador (Nome)"].map(limpa_artefato_float)
-    sai["Setor"]                        = comp["Setor"].map(limpa_artefato_float)
-    sai["Emissão"]                      = comp["Emissão"].map(limpa_artefato_float)
-    consta = [k in nf_qtde for k in chaves]
-    sai["Consta na base de NF"]              = ["Sim" if c else "Não" for c in consta]
-    sai["Lançamentos NF na base (OC+item)"]  = [nf_qtde.get(k, 0) for k in chaves]
-    sai["Valor Rateio total (OC+item)"]      = [rateio_total.get(k) for k in chaves]
-    sai["Valor NF na base (OC+item)"]        = [nf_valor.get(k) for k in chaves]
-    sai["Diferença NF - Rateio (OC+item)"]   = [
-        (nf_valor.get(k) - rateio_total.get(k))
-        if (nf_valor.get(k) is not None and rateio_total.get(k) is not None)
+    for col in base.columns:
+        if col.startswith("_"):
+            continue
+        sai[col] = coluna_numerica(base[col])
+
+    chaves = list(zip(base["_oc"], base["_cod"]))
+    consta_ped = [k in pedido_qtde for k in chaves]
+    sai["Complemento da Descrição"]        = [compl_desc.get(k, "") for k in chaves]
+    sai["Consta no Pedido (complemento)"]  = ["Sim" if c else "Não" for c in consta_ped]
+    sai["Valor Rateio total (OC+item)"]    = [rateio_total.get(k) for k in chaves]
+    sai["Valor NF total (OC+item)"]        = [nf_total.get(k) for k in chaves]
+    sai["Diferença NF - Rateio (OC+item)"] = [
+        (nf_total.get(k) - rateio_total.get(k))
+        if (nf_total.get(k) is not None and rateio_total.get(k) is not None)
         else None
         for k in chaves
     ]
-
-    # ── Parte 2: NFs da base SEM item de pedido (agregado OC+item) ──
-    chaves_comp = set(chaves)
-    falt = agg[~agg["_key"].isin(chaves_comp)].copy()
-    extra = pd.DataFrame(index=falt.index, columns=sai.columns)
-    if len(falt):
-        extra["Nº Ordem Compra"]              = falt["oc_orig"].map(limpa_artefato_float)
-        extra["Seq."]                         = ""
-        extra["Cód Serviço"]                  = falt["cod_orig"].map(limpa_artefato_float)
-        extra["DESCRIÇÃO PRODUTO OU SERVIÇO"] = falt["descricao"].fillna("")
-        extra["Categoria do Serviço"]         = falt["_cod"].map(lambda c: mapa_categoria.get(c, ""))
-        for col in ["Complemento da Descrição", "U.M. O.C.", "Fornecedor",
-                    "Fantasia Fornecedor", "Projeto", "Descr. Projeto", "Fase",
-                    "Descr. Fase", "Conta Financeira", "Conta Contábil",
-                    "Usuário Comprador", "Setor", "Emissão"]:
-            extra[col] = ""
-        extra["Consta na base de NF"]             = "NF sem pedido"
-        extra["Lançamentos NF na base (OC+item)"] = falt["nf_qtde"].values
-        extra["Valor NF na base (OC+item)"]       = falt["nf_valor"].values
-        # Quantidade Pedida / Valor do Rateio / Valor Rateio total / Diferenca: vazios
-
-    saida = pd.concat([sai, extra], ignore_index=True)
-
-    # Garante dtype numerico nas colunas de valor (p/ exportar com decimal ',')
-    for col in COLS_NUMERICAS:
-        saida[col] = pd.to_numeric(saida[col], errors="coerce")
+    for col in COLS_NUM_ENRIQUECIMENTO:
+        sai[col] = pd.to_numeric(sai[col], errors="coerce")
 
     # ── Relatorio ─────────────────────────────────────────────
-    n_consta = sum(consta)
-    print("\n--- Resumo da conciliacao (full outer) ---")
-    print(f"  Itens do pedido               : {len(sai)}")
-    print(f"    com NF na base (Sim)        : {n_consta}")
-    print(f"    sem NF na base (Não)        : {len(sai) - n_consta}")
-    print(f"  NFs da base sem pedido        : {len(falt)} chaves OC+item")
-    print(f"  TOTAL de linhas               : {len(saida)}")
-    if n_sem_chave:
-        print(f"  [aviso] {n_sem_chave} linhas de NF na base sem OC ou codigo nao entraram (sem chave)")
+    n_ped = sum(consta_ped)
+    print("\n--- Resumo (base de NFs enriquecida pelo complemento) ---")
+    print(f"  Linhas de NF (base 2025+2026)    : {len(sai)}")
+    print(f"    com pedido no complemento      : {n_ped}")
+    print(f"    sem pedido (enriquec. em branco): {len(sai) - n_ped}")
+    print(f"  Complemento da Descricao preench.: {(sai['Complemento da Descrição'] != '').sum()}")
 
-    return saida
+    return sai
 
 
 def main():
