@@ -110,6 +110,18 @@ def normaliza_chave(valor):
     return texto.lstrip("0") or "0"
 
 
+def normaliza_codigo(valor):
+    """Normaliza o codigo do produto/servico para o cruzamento como TEXTO:
+    remove apenas o artefato '.0' da exportacao, mas PRESERVA zeros a esquerda
+    (ex.: '26' e '0026' sao produtos diferentes e nao podem ser tratados iguais)."""
+    if pd.isna(valor):
+        return None
+    texto = re.sub(r"\.0+$", "", str(valor).strip())
+    if texto == "":
+        return None
+    return texto
+
+
 def limpa_artefato_float(valor):
     """Remove o sufixo '.0' deixado pela leitura Excel em inteiros,
     preservando decimais reais e codigos com zeros a esquerda."""
@@ -124,10 +136,11 @@ def limpa_artefato_float(valor):
 def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     """Cruza os itens do pedido (espinha) com a base de NFs de entrada."""
     # Chaves normalizadas (nao alteram as colunas de saida)
+    # OC: normalizada numericamente; CODIGO: comparado como texto (preserva zeros)
     base["_oc"]  = base["ORDEM DE COMPRA"].map(normaliza_chave)
-    base["_cod"] = base["CÓD PROD/SERV"].map(normaliza_chave)
+    base["_cod"] = base["CÓD PROD/SERV"].map(normaliza_codigo)
     comp["_oc"]  = comp["Nº Ordem Compra"].map(normaliza_chave)
-    comp["_cod"] = comp["Serviço"].map(normaliza_chave)
+    comp["_cod"] = comp["Serviço"].map(normaliza_codigo)
 
     # ── Enriquecimento 1: nome da categoria do servico (por codigo) ──
     nomes = (
