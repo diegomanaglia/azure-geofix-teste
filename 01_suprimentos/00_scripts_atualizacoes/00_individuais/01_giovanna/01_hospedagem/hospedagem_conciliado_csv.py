@@ -196,8 +196,9 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     nf_total = base_val.groupby([base["_oc"], base["_cod"]]).sum().to_dict()
 
     # Posicao da linha de NF dentro do OC+item (p/ parear 1 complemento por linha)
-    base["_pos"] = base.groupby(["_oc", "_cod"]).cumcount()
-    tam_grupo = base.groupby(["_oc", "_cod"]).size().to_dict()
+    # dropna=False: linhas sem OC/codigo tambem recebem posicao inteira (evita NaN)
+    base["_pos"] = base.groupby(["_oc", "_cod"], dropna=False).cumcount()
+    tam_grupo = base.groupby(["_oc", "_cod"], dropna=False).size().to_dict()
 
     # ── Saida: base COMPLETA (todas as colunas A:AH), 1 linha por NF ──
     sai = pd.DataFrame()
