@@ -133,17 +133,9 @@ def limpa_artefato_float(valor):
     return texto
 
 
-def _agrega_complementos(serie):
-    """Concatena os complementos distintos de um mesmo OC+item, preservando a
-    ordem de aparicao e sem repetir textos iguais."""
-    vistos = []
-    for valor in serie:
-        if pd.isna(valor):
-            continue
-        texto = str(valor).strip()
-        if texto and texto not in vistos:
-            vistos.append(texto)
-    return " | ".join(vistos)
+def _lista_complementos(serie):
+    """Lista (em ordem de Seq.) os complementos nao vazios de um mesmo OC+item."""
+    return [str(v).strip() for v in serie if pd.notna(v) and str(v).strip() != ""]
 
 
 _RE_NUM = r"^-?\d+(\.\d+)?$"        # numero inteiro ou decimal (ponto)
@@ -185,14 +177,14 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     comp["_oc"]  = comp["Nº Ordem Compra"].map(normaliza_chave)
     comp["_cod"] = comp["Serviço"].map(normaliza_codigo)
 
-    # ── Enriquecimento do complemento, agregado por (OC+item) ──
-    # Complemento da Descricao: concatena distintos preservando a ordem de Seq.
+    # ── Enriquecimento do complemento ──
+    # Lista de complementos por OC+item, em ordem de Seq. (1 por item do pedido)
     comp_ord = comp.copy()
     comp_ord["_seq"] = pd.to_numeric(comp_ord["Seq."], errors="coerce")
     comp_ord = comp_ord.sort_values(["_oc", "_cod", "_seq"], kind="stable")
-    compl_desc = (
+    compl_por_chave = (
         comp_ord.groupby(["_oc", "_cod"])["Complemento da Descrição"]
-        .agg(_agrega_complementos)
+        .apply(_lista_complementos)
         .to_dict()
     )
     rat_val      = pd.to_numeric(comp["Valor do Rateio"], errors="coerce")
@@ -203,6 +195,10 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     base_val = pd.to_numeric(base["VALOR TOTAL"], errors="coerce")
     nf_total = base_val.groupby([base["_oc"], base["_cod"]]).sum().to_dict()
 
+    # Posicao da linha de NF dentro do OC+item (p/ parear 1 complemento por linha)
+    base["_pos"] = base.groupby(["_oc", "_cod"]).cumcount()
+    tam_grupo = base.groupby(["_oc", "_cod"]).size().to_dict()
+
     # ── Saida: base COMPLETA (todas as colunas A:AH), 1 linha por NF ──
     sai = pd.DataFrame()
     for col in base.columns:
@@ -212,7 +208,23 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
 
     chaves = list(zip(base["_oc"], base["_cod"]))
     consta_ped = [k in pedido_qtde for k in chaves]
-    sai["Complemento da Descrição"]        = [compl_desc.get(k, "") for k in chaves]
+
+    # Complemento da Descricao: 1 por linha, pareado por posicao (Seq.) dentro do
+    # OC+item. Se houver mais complementos do que linhas de NF, as sobras vao na
+    # ultima linha do grupo (para nao perder informacao); se houver menos,
+    # as linhas excedentes ficam em branco.
+    compl_col = []
+    for (oc, cod), pos in zip(chaves, base["_pos"].tolist()):
+        lst = compl_por_chave.get((oc, cod), [])
+        n = tam_grupo.get((oc, cod), 0)
+        if not lst or pos >= len(lst):
+            compl_col.append("")
+        elif pos == n - 1:
+            compl_col.append(" | ".join(lst[pos:]))
+        else:
+            compl_col.append(lst[pos])
+
+    sai["Complemento da Descrição"]        = compl_col
     sai["Consta no Pedido (complemento)"]  = ["Sim" if c else "Não" for c in consta_ped]
     sai["Valor Rateio total (OC+item)"]    = [rateio_total.get(k) for k in chaves]
     sai["Valor NF total (OC+item)"]        = [nf_total.get(k) for k in chaves]
