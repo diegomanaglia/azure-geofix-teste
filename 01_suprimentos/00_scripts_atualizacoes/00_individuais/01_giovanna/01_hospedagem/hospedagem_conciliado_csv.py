@@ -133,11 +133,6 @@ def limpa_artefato_float(valor):
     return texto
 
 
-def _lista_complementos(serie):
-    """Lista (em ordem de Seq.) os complementos nao vazios de um mesmo OC+item."""
-    return [str(v).strip() for v in serie if pd.notna(v) and str(v).strip() != ""]
-
-
 _RE_NUM = r"^-?\d+(\.\d+)?$"        # numero inteiro ou decimal (ponto)
 _RE_DECIMAL = r"\.\d*[1-9]"          # tem parte decimal diferente de zero
 
@@ -158,17 +153,30 @@ def coluna_numerica(serie: pd.Series) -> pd.Series:
     return serie.map(limpa_artefato_float)
 
 
-# Colunas numericas de enriquecimento (forcadas a numero p/ decimal ',')
-COLS_NUM_ENRIQUECIMENTO = [
-    "Valor Rateio total (OC+item)", "Valor NF total (OC+item)",
-    "Diferença NF - Rateio (OC+item)",
+# Tolerancia em reais para considerar VALOR TOTAL == Valor do Rateio
+TOLERANCIA_VALOR = 0.01
+
+# Niveis de correspondencia, do mais estrito ao mais flexivel:
+# (rotulo, usa_codigo, usa_quantidade) -- o valor (VALOR TOTAL == Valor do Rateio)
+# e exigido em todos os niveis.
+NIVEIS_MATCH = [
+    ("EXATO (cod+valor+qtd)", True,  True),
+    ("ALTO (cod+valor)",      True,  False),
+    ("MEDIO (valor+qtd)",     False, True),
+    ("MEDIO (somente valor)", False, False),
 ]
 
 
 def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     """Mantem a base de NFs (2025+2026) COMPLETA como espinha (uma linha por NF,
-    todas as colunas A:AH) e ENRIQUECE com dados do complemento por OC+item.
-    O que nao casar no complemento fica em branco."""
+    todas as colunas) e traz 'Complemento da Descrição' do complemento (alpha)
+    para cada linha, por correspondencia em cascata dentro de cada Ordem de Compra:
+      1) EXATO : codigo + valor (VALOR TOTAL == Valor do Rateio) + quantidade
+      2) ALTO  : codigo + valor
+      3) MEDIO : valor + quantidade
+      4) MEDIO : somente valor
+    Cada complemento e consumido no maximo uma vez por Ordem de Compra (evita que
+    duas linhas reivindiquem a mesma origem). O que nao casar fica em branco."""
     base = base.copy()
     comp = comp.copy()
     # Chaves: OC normalizada numericamente; CODIGO comparado como texto (preserva zeros)
@@ -177,74 +185,92 @@ def conciliar(base: pd.DataFrame, comp: pd.DataFrame) -> pd.DataFrame:
     comp["_oc"]  = comp["Nº Ordem Compra"].map(normaliza_chave)
     comp["_cod"] = comp["Serviço"].map(normaliza_codigo)
 
-    # ── Enriquecimento do complemento ──
-    # Lista de complementos por OC+item, em ordem de Seq. (1 por item do pedido)
-    comp_ord = comp.copy()
-    comp_ord["_seq"] = pd.to_numeric(comp_ord["Seq."], errors="coerce")
-    comp_ord = comp_ord.sort_values(["_oc", "_cod", "_seq"], kind="stable")
-    compl_por_chave = (
-        comp_ord.groupby(["_oc", "_cod"])["Complemento da Descrição"]
-        .apply(_lista_complementos)
-        .to_dict()
-    )
-    rat_val      = pd.to_numeric(comp["Valor do Rateio"], errors="coerce")
-    rateio_total = rat_val.groupby([comp["_oc"], comp["_cod"]]).sum().to_dict()
-    pedido_qtde  = comp.groupby(["_oc", "_cod"]).size().to_dict()
+    # Valores numericos usados na correspondencia
+    base["_total"]  = pd.to_numeric(base["VALOR TOTAL"], errors="coerce")
+    base["_qtd"]    = pd.to_numeric(base["QUANTIDADE"], errors="coerce")
+    comp["_rateio"] = pd.to_numeric(comp["Valor do Rateio"], errors="coerce")
+    comp["_qtdped"] = pd.to_numeric(comp["Quantidade Pedida"], errors="coerce")
+    comp["_seq"]    = pd.to_numeric(comp["Seq."], errors="coerce")
 
-    # Valor total de NF por (OC+item) na propria base, para a diferenca
-    base_val = pd.to_numeric(base["VALOR TOTAL"], errors="coerce")
-    nf_total = base_val.groupby([base["_oc"], base["_cod"]]).sum().to_dict()
+    # Complemento escolhido na ordem de Seq. (o primeiro candidato = menor Seq.)
+    comp = comp.sort_values(["_oc", "_seq"], kind="stable")
+    comp_por_oc = {oc: grp for oc, grp in comp.groupby("_oc")}
 
-    # Posicao da linha de NF dentro do OC+item (p/ parear 1 complemento por linha)
-    # dropna=False: linhas sem OC/codigo tambem recebem posicao inteira (evita NaN)
-    base["_pos"] = base.groupby(["_oc", "_cod"], dropna=False).cumcount()
-    tam_grupo = base.groupby(["_oc", "_cod"], dropna=False).size().to_dict()
+    complemento = {}   # indice da linha do base -> texto do complemento (ou None)
+    status = {}        # indice da linha do base -> status do vinculo
 
-    # ── Saida: base COMPLETA (todas as colunas A:AH), 1 linha por NF ──
+    for oc, base_grp in base.groupby("_oc", dropna=False):
+        alpha_grp = comp_por_oc.get(oc)
+        if alpha_grp is None or alpha_grp.empty:
+            for idx in base_grp.index:
+                complemento[idx] = None
+                status[idx] = "OC AUSENTE NO ALPHA"
+            continue
+
+        a_idx   = list(alpha_grp.index)              # ja em ordem de Seq.
+        a_cod   = alpha_grp["_cod"].to_dict()
+        a_rat   = alpha_grp["_rateio"].to_dict()
+        a_qtd   = alpha_grp["_qtdped"].to_dict()
+        a_compl = alpha_grp["Complemento da Descrição"].to_dict()
+        b_cod   = base_grp["_cod"].to_dict()
+        b_total = base_grp["_total"].to_dict()
+        b_qtd   = base_grp["_qtd"].to_dict()
+
+        usados = set()                               # alpha ja consumidos nesta OC
+        pendentes = list(base_grp.index)
+
+        for rotulo, usar_cod, usar_qtd in NIVEIS_MATCH:
+            ainda = []
+            for bidx in pendentes:
+                cod, total, qtd = b_cod[bidx], b_total[bidx], b_qtd[bidx]
+                candidatos = []
+                for aidx in a_idx:
+                    if aidx in usados:
+                        continue
+                    if usar_cod and a_cod[aidx] != cod:
+                        continue
+                    rat = a_rat[aidx]
+                    if pd.isna(rat) or pd.isna(total) or abs(rat - total) > TOLERANCIA_VALOR:
+                        continue
+                    if usar_qtd:
+                        aq = a_qtd[aidx]
+                        if pd.isna(aq) or pd.isna(qtd) or abs(aq - qtd) > 1e-9:
+                            continue
+                    candidatos.append(aidx)
+                if not candidatos:
+                    ainda.append(bidx)
+                    continue
+                distintos = {a_compl[c] for c in candidatos}
+                escolhido = candidatos[0]            # primeiro pela ordem de Seq.
+                usados.add(escolhido)
+                obs = "" if len(distintos) == 1 else " [multiplos candidatos - revisar]"
+                complemento[bidx] = a_compl[escolhido]
+                status[bidx] = rotulo + obs
+            pendentes = ainda
+            if not pendentes:
+                break
+
+        for bidx in pendentes:
+            complemento[bidx] = None
+            status[bidx] = "SEM CORRESPONDENTE"
+
+    # ── Saida: base COMPLETA + Complemento da Descrição + Status ──
     sai = pd.DataFrame()
     for col in base.columns:
         if col.startswith("_"):
             continue
         sai[col] = coluna_numerica(base[col])
-
-    chaves = list(zip(base["_oc"], base["_cod"]))
-    consta_ped = [k in pedido_qtde for k in chaves]
-
-    # Complemento da Descricao: 1 por linha, pareado por posicao (Seq.) dentro do
-    # OC+item. Se houver mais complementos do que linhas de NF, as sobras vao na
-    # ultima linha do grupo (para nao perder informacao); se houver menos,
-    # as linhas excedentes ficam em branco.
-    compl_col = []
-    for (oc, cod), pos in zip(chaves, base["_pos"].tolist()):
-        lst = compl_por_chave.get((oc, cod), [])
-        n = tam_grupo.get((oc, cod), 0)
-        if not lst or pos >= len(lst):
-            compl_col.append("")
-        elif pos == n - 1:
-            compl_col.append(" | ".join(lst[pos:]))
-        else:
-            compl_col.append(lst[pos])
-
-    sai["Complemento da Descrição"]        = compl_col
-    sai["Consta no Pedido (complemento)"]  = ["Sim" if c else "Não" for c in consta_ped]
-    sai["Valor Rateio total (OC+item)"]    = [rateio_total.get(k) for k in chaves]
-    sai["Valor NF total (OC+item)"]        = [nf_total.get(k) for k in chaves]
-    sai["Diferença NF - Rateio (OC+item)"] = [
-        (nf_total.get(k) - rateio_total.get(k))
-        if (nf_total.get(k) is not None and rateio_total.get(k) is not None)
-        else None
-        for k in chaves
-    ]
-    for col in COLS_NUM_ENRIQUECIMENTO:
-        sai[col] = pd.to_numeric(sai[col], errors="coerce")
+    sai["Complemento da Descrição"] = [complemento.get(i) for i in base.index]
+    sai["Status do Vínculo"]        = [status.get(i) for i in base.index]
 
     # ── Relatorio ─────────────────────────────────────────────
-    n_ped = sum(consta_ped)
-    print("\n--- Resumo (base de NFs enriquecida pelo complemento) ---")
-    print(f"  Linhas de NF (base 2025+2026)    : {len(sai)}")
-    print(f"    com pedido no complemento      : {n_ped}")
-    print(f"    sem pedido (enriquec. em branco): {len(sai) - n_ped}")
-    print(f"  Complemento da Descricao preench.: {(sai['Complemento da Descrição'] != '').sum()}")
+    serie_status = pd.Series([status.get(i) for i in base.index])
+    com_match = int(sai["Complemento da Descrição"].notna().sum())
+    print("\n--- Resumo (base enriquecida / cascata por Ordem de Compra) ---")
+    print(f"  Linhas de NF (base 2025+2026): {len(sai)}")
+    for st, qt in serie_status.value_counts().items():
+        print(f"    {st}: {qt}")
+    print(f"  Com complemento preenchido   : {com_match} ({com_match/len(sai)*100:.1f}%)")
 
     return sai
 
